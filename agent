@@ -1,0 +1,296 @@
+#!/bin/bash
+###########################################
+# import                                  #
+# Author: Tay Kratzer - tay@cimitra.com   #
+# Version: 1.0                            #
+# Modify date: 5/21/2020                  #
+###########################################
+# Cimitra Agent Control Tool
+ 
+# Allow the ability to override global variables above
+source /var/opt/cimitra/api/settings_api.cfg 2> /dev/null
+
+# Global Variables
+declare -i SHOW_HELP=0
+
+declare -i OS_IS_LINUX=`echo "${OSTYPE}" | grep -ic "linux"`
+declare -i OS_IS_MAC=`echo "${OSTYPE}" | grep -ic "darwin"`
+declare -i ROOT_USER=`whoami | grep -c "root"`
+
+while getopts "hs:" opt; do
+  case ${opt} in
+    h) SHOW_HELP="1"
+      ;;
+  esac
+done
+
+SCRIPT_COMMAND_LINE_IN=`echo $@`
+
+function SHOW_TIME() {
+    num=$1
+	message=$2
+    min=0
+    hour=0
+    day=0
+    if((num>59));then
+        ((sec=num%60))
+        ((num=num/60))
+        if((num>59));then
+            ((min=num%60))
+            ((num=num/60))
+            if((num>23));then
+                ((hour=num%24))
+                ((day=num/24))
+            else
+                ((hour=num))
+            fi
+        else
+            ((min=num))
+        fi
+    else
+        ((sec=num))
+    fi
+	
+	declare -i IN_DEMO_MODE=`echo "${CIMITRA_SERVER_ADDRESS}" | grep -c "192.168.1.21"`
+	
+    echo "Total ${message} Time: "$hour"h "$min"m "$sec"s"
+
+}
+
+function CALL_ERROR_EXIT()
+{
+ERROR_MESSAGE="$1"
+ERROR_MESSAGE="  ${ERROR_MESSAGE}  "
+echo ""
+if [ -t 0 ]
+then
+echo "$(tput setaf 1)ERROR:$(tput setab 7)${ERROR_MESSAGE}$(tput sgr 0)"
+else
+echo "ERROR:${ERROR_MESSAGE}"
+fi
+echo ""
+exit 1
+}
+
+function CALL_EXIT()
+{
+EXIT_CODE="$1"
+exit ${EXIT_CODE}
+}
+
+function CALL_INFO()
+{
+INFO_MESSAGE="$1"
+INFO_MESSAGE="  ${INFO_MESSAGE}  "
+echo ""
+if [ -t 0 ]
+then
+echo "$(tput setaf 2)$(tput setab 4)INFO:$(tput setaf 4)$(tput setab 7)${INFO_MESSAGE}$(tput sgr 0)"
+else
+echo "INFO:${INFO_MESSAGE}"
+fi
+echo ""
+}
+
+function CALL_COMMAND()
+{
+INFO_MESSAGE="$1"
+INFO_MESSAGE="  ${INFO_MESSAGE}  "
+echo ""
+if [ -t 0 ]
+then
+echo "$(tput setaf 2)$(tput setab 4)COMMAND:$(tput setaf 4)$(tput setab 7)${INFO_MESSAGE}$(tput sgr 0)"
+else
+echo "COMMAND:${INFO_MESSAGE}"
+fi
+echo ""
+}
+
+function SHOW_HELP()
+{
+echo ""
+echo $"Usage: cimitra agent {start|stop|restart|status|info|checkup|checkup install|help}"
+echo ""
+echo "The 'checkup' command checks to see if the Cimitra Agent is up, if it is not, it will start the Cimitra Agent"
+echo ""
+echo ""
+echo "The 'cimitra agent checkup install' adds the line: '* * * * * root cimitra agent checkup' command to the /etc/crontab file, if it exists"
+echo "It also issues a '/etc/init.d/cron restart' command"
+echo ""
+}
+
+if [ $SHOW_HELP -eq 1 ]
+then
+SHOW_HELP ${EXIT_CODE}
+exit 0
+fi
+
+function INITIATE()
+{
+
+if [ $OS_IS_LINUX -eq 1 ]
+then
+CIMITRA_AGENT_BINARY_FILE="/usr/bin/cimagent"
+fi
+
+if [ $OS_IS_MAC -eq 1 ]
+then
+CIMITRA_AGENT_BINARY_FILE="/usr/local/bin/cimagent"
+fi
+
+declare -i CIMITRA_AGENT_BINARY_FILE_EXISTS=`test -f ${CIMITRA_AGENT_BINARY_FILE} ; echo $?` 
+
+if [ $CIMITRA_AGENT_BINARY_FILE_EXISTS -ne 0 ]
+then
+CALL_ERROR_EXIT "The Cimitra Agent ${CIMITRA_AGENT_BINARY_FILE} does not exist"
+fi
+
+}
+
+function info()
+{
+if [ $OS_IS_LINUX -eq 1 ]
+then
+CIMITRA_AGENT_BINARY_FILE="/usr/bin/cimagent"
+fi
+
+if [ $OS_IS_MAC -eq 1 ]
+then
+CIMITRA_AGENT_BINARY_FILE="/usr/local/bin/cimagent"
+fi
+
+${CIMITRA_AGENT_BINARY_FILE}
+
+echo "Checking Agent Running Status"
+echo ""
+cimitra status
+echo ""
+}
+
+
+function start()
+{
+INITIATE
+CALL_INFO "Cimitra Agent Start Command Called"
+CALL_COMMAND "sudo cimitra start"
+sudo cimitra start
+}
+
+function stop()
+{
+INITIATE
+CALL_INFO "Cimitra Agent Stop Command Called"
+CALL_COMMAND "sudo cimitra stop"
+sudo cimitra stop
+}
+
+function status()
+{
+INITIATE
+CALL_INFO "Cimitra Agent Status Command Called"
+CALL_COMMAND "sudo cimitra stop"
+sudo cimitra status
+}
+
+function UPGRADE()
+{
+INITIATE
+}
+
+function info()
+{
+INITIATE
+info
+}
+
+function CHECKUP_INSTALL_TO_CRON()
+{
+CRONTAB_FILE="/etc/crontab"
+
+test -f ${CRONTAB_FILE}
+
+declare -i CRONTAB_EXISTS=`echo $?`
+
+if [ $CRONTAB_EXISTS -ne 0 ]
+then
+CALL_ERROR_EXIT "Cannot locate ${CRONTAB_FILE}"
+fi
+
+if [ $ROOT_USER -eq 0 ]
+then
+CALL_ERROR_EXIT "Cannot edit ${CRONTAB_FILE}, you must sudo in as root 'sudo su'"
+fi
+
+declare -i CIMTRA_AGENT_CHECKUP_EXISTS=`cat ${CRONTAB_FILE} | grep -wc "* * * * * root cimitra agent checkup"`
+
+if [ $CIMTRA_AGENT_CHECKUP_EXISTS -gt 0 ]
+then
+CALL_INFO "The cimitra agent checkup command is already setup in ${CRONTAB_FILE}"
+CALL_EXIT "0"
+fi
+CALL_COMMAND "kill -9 $(cat /var/run/crond.pid)"
+kill -9 $(cat /var/run/crond.pid)
+CALL_COMMAND "kill -9 $(cat /run/cron.pid)"
+kill -9 $(cat /run/cron.pid)
+CALL_COMMAND "cron stop" 
+cron stop
+echo "" 1>> ${CRONTAB_FILE} 
+echo "* * * * * root cimitra agent checkup" 1>> ${CRONTAB_FILE} 
+echo "" 1>> ${CRONTAB_FILE} 
+CALL_INFO "Attempting to start the cron utility"
+CALL_COMMAND "cron start" 
+cron start &
+CALL_INFO "Finished cimitra agent checkup command setup in ${CRONTAB_FILE}"
+CALL_EXIT 0
+}
+
+function checkup()
+{
+
+declare -i SCRIPT_COMMAND_LINE_IN_HAS_INSTALL=`echo "${SCRIPT_COMMAND_LINE_IN}" | grep -c "install"`
+
+if [ $SCRIPT_COMMAND_LINE_IN_HAS_INSTALL -gt 0 ]
+then
+CHECKUP_INSTALL_TO_CRON
+return 0
+fi
+
+declare -i CIMITRA_AGENT_RUNNING=`sudo cimitra status | grep -c "PID"` 1> /dev/null 2> /dev/null
+
+if [ $CIMITRA_AGENT_RUNNING -eq 0 ]
+then
+stop
+start
+CALL_EXIT "1"
+else
+CALL_EXIT "0"
+fi
+}
+
+case "$1" in
+    start)
+	start 
+	;;
+    stop)
+	stop
+	;;
+    restart)
+	stop
+	start
+	;;
+    status)
+	status
+	;;
+	checkup)
+	checkup
+	;;
+	upgrade)
+	:
+	;;
+    help)
+	SHOW_HELP
+	;;
+    *)
+	SHOW_HELP
+	;;
+esac
